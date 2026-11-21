@@ -40,6 +40,18 @@ class SignIn(unittest.TestCase):
             Reeldesk(CONN, http).sign_in("render@example.test", "secret-pw")
         self.assertNotIn("secret-pw", str(err.exception))
 
+    def test_a_gateway_refusal_says_which_kind(self):
+        http = mock.Mock()
+        http.post.return_value = response(status=403, json_body={"message": "Forbidden"},
+                                          headers={"x-amzn-errortype": "ForbiddenException:http://x", "x-amzn-requestid": "req-1"})
+        conn = Connection(base_url="https://app.example.test", org_code="org-1", api_key="apikey-value-123", client_id="CID")
+        with self.assertRaises(ReeldeskError) as err:
+            Reeldesk(conn, http).sign_in("render@example.test", "secret-pw")
+        message = str(err.exception)
+        self.assertIn("403, ForbiddenException: Forbidden, request id req-1", message)
+        self.assertNotIn("secret-pw", message)
+        self.assertNotIn("apikey-value-123", message)
+
 
 class Errors(unittest.TestCase):
     def signed_in(self, status):

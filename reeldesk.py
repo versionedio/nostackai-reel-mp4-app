@@ -47,6 +47,26 @@ def check_id(value: str) -> str:
     return value
 
 
+def refusal(res: requests.Response) -> str:
+    """Why a call was refused, safe for public logs: the status, the gateway's error type and short
+    message (e.g. "ForbiddenException: Forbidden", "Missing Authentication Token") and the request id
+    to look up in the platform's logs. Never the request, headers or a long body."""
+    parts = [str(res.status_code)]
+    kind = res.headers.get("x-amzn-errortype", "").split(":")[0]
+    try:
+        body = res.json()
+        message = body.get("message") or body.get("error") if isinstance(body, dict) else None
+    except ValueError:
+        message = None
+    detail = ": ".join(x for x in (kind, str(message)[:120] if message else "") if x)
+    if detail:
+        parts.append(detail)
+    request_id = res.headers.get("x-amzn-requestid") or res.headers.get("x-amz-apigw-id")
+    if request_id:
+        parts.append(f"request id {request_id}")
+    return ", ".join(parts)
+
+
 class Reeldesk:
     def __init__(self, conn: Connection, session: requests.Session | None = None):
         self.conn = conn
@@ -61,13 +81,15 @@ class Reeldesk:
                                headers={"x-api-key": self.conn.api_key}, timeout=TIMEOUT)
         oauth = login.headers.get("oauthtoken")
         if login.status_code != 200 or not oauth:
-            raise ReeldeskError(f"Sign-in refused ({login.status_code}): check the render user's email and password.")
+            raise ReeldeskError(f"Sign-in refused ({refusal(login)}). A 403 here comes from the gateway: check "
+                                "REELDESK_APP_URL (just the host, e.g. https://dd1use2.nostackai.com) and REELDESK_API_KEY; "
+                                "a 401 means the render user's email or password.")
         token_res = self.http.get(f"{self.conn.app_url}/token", timeout=TIMEOUT, headers={
             "oauthtoken": oauth, "x-api-key": self.conn.api_key, "client_id": self.conn.client_id,
         })
         token = token_res.headers.get("x-nostackai-token")
         if token_res.status_code != 200 or not token:
-            raise ReeldeskError(f"Token refused ({token_res.status_code}): check the render user's access.")
+            raise ReeldeskError(f"Token refused ({refusal(token_res)}): check REELDESK_CLIENT_ID and REELDESK_API_KEY.")
         self.token, self.email = token, email
 
     # ── records ──────────────────────────────────────────────────────────────────────────────
